@@ -13,7 +13,7 @@ dotenv.config();
 const app = express();
 
 // Middlewares
-app.use(cors());
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 // Connect to PostgreSQL
@@ -26,13 +26,15 @@ const pool = new Pool({
 });
 
 // Routes for user-related functionality (user registration, login)
-app.use('/api/users', userRoute); // Changed to '/api/users'
+app.use('/api/users', userRoute); 
 
 // Routes for bus-related functionality (bus and schedule management)
-app.use('/api', busRoute); // Changed to '/api/buses'
+app.use('/api', busRoute); 
 
-// Protect operator routes with middleware (verifyToken)
-// app.use('/api/operator', verifyToken); // Operator routes
+
+app.use('/', (req, res) => {
+  res.send('Server is running successfully!');
+});
 
 // Start the server
 const PORT = process.env.PORT || 5000;
