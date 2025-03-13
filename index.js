@@ -18,11 +18,10 @@ app.use(express.json());
 
 // Connect to PostgreSQL
 const pool = new Pool({
-  user: process.env.PG_USER,
-  host: process.env.PG_HOST,
-  database: process.env.PG_DATABASE,
-  password: process.env.PG_PASSWORD,
-  port: process.env.PG_PORT || 5432,
+  connectionString: process.env.POSTGRES_URL, // Use the connection string provided by Supabase
+  ssl: {
+    rejectUnauthorized: false,  // If you encounter SSL issues, this flag helps in resolving them.
+  },
 });
 
 // Routes for user-related functionality (user registration, login)
