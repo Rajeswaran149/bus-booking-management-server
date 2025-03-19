@@ -1,38 +1,42 @@
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
-const dotenv = require('dotenv');
-const verifyToken = require('./auth/token');
-const userRoute = require('./routes/userRoutes');
-const busRoute = require('./routes/busRoutes');
+const express = require("express");
+const cors = require("cors");
+const dotenv = require("dotenv");
+const supabase = require("./db");
+const userRoute = require("./routes/userRoutes");
+const busRoute = require("./routes/busRoutes");
 
-// Initialize dotenv for environment variables
 dotenv.config();
 
-// Create Express app
 const app = express();
 
 // Middlewares
-app.use(cors({ origin: '*' }));
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// Connect to PostgreSQL
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL, // Use the connection string provided by Supabase
-  ssl: {
-    rejectUnauthorized: false,  // If you encounter SSL issues, this flag helps in resolving them.
-  },
-});
+// Test the connection when the app starts (using Supabase)
+async function testConnection() {
+  try {
+    const { data, error } = await supabase.from("users").select("*");
+    console.log("data", data);
 
-// Routes for user-related functionality (user registration, login)
-app.use('/api/users', userRoute); 
+    if (error) {
+      console.error("Database connection error:", error.message);
+    } else {
+      console.log("Database connection successful:", data);
+    }
+  } catch (err) {
+    console.error("Database connection error:", err.message);
+  }
+}
 
-// Routes for bus-related functionality (bus and schedule management)
-app.use('/api', busRoute); 
+testConnection();
 
+app.use("/api/users", userRoute);
 
-app.use('/', (req, res) => {
-  res.send('Server is running successfully!');
+app.use("/api", busRoute);
+
+app.use("/", (req, res) => {
+  res.send("Server is running successfully!");
 });
 
 // Start the server

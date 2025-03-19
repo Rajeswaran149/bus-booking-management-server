@@ -1,12 +1,19 @@
-const { Pool } = require('pg');
+const { createClient } = require('@supabase/supabase-js');
 const dotenv = require('dotenv');
-dotenv.config();  
+dotenv.config();
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL, 
-  ssl: {
-    rejectUnauthorized: false,  
-  },
-});
+const supabaseUrl = process.env.SUPABASE_URL; 
+const supabaseKey = process.env.SUPABASE_ANON_KEY; 
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-module.exports = pool;
+
+async function getUsers() {
+    const { data, error } = await supabase.from('users').select('*');
+    if (error) {
+        console.error(error);
+    } else {
+        console.log(data);
+    }
+}
+
+getUsers();

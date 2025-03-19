@@ -1,7 +1,8 @@
 const express = require('express');
-const router = express.Router();
-const pool = require('../db');
+const supabase = require('../db');
 const verifyToken = require('../auth/token');
+
+const router = express.Router();
 
 // Add a new bus (accessible by operators only)
 router.post('/operator/buses', verifyToken, async (req, res) => {
@@ -15,11 +16,17 @@ router.post('/operator/buses', verifyToken, async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      'INSERT INTO buses(name, total_seats) VALUES ($1, $2) RETURNING *',
-      [name, total_seats]
-    );
-    res.status(201).json(result.rows[0]);
+    // Insert bus into the 'buses' table
+    const { data, error } = await supabase
+      .from('buses')
+      .insert([{ name, total_seats }])
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: 'Database error while adding bus' });
+    }
+
+    res.status(201).json(data[0]);
   } catch (err) {
     console.error('Error adding bus:', err);
     res.status(500).json({ error: 'Database error while adding bus' });
@@ -29,8 +36,15 @@ router.post('/operator/buses', verifyToken, async (req, res) => {
 // Get all buses (accessible to everyone)
 router.get('/buses', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM buses');
-    res.status(200).json(result.rows);
+    const { data, error } = await supabase
+      .from('buses')
+      .select('*');
+
+    if (error) {
+      return res.status(500).json({ error: 'Database error while fetching buses' });
+    }
+
+    res.status(200).json(data);
   } catch (err) {
     console.error('Error fetching buses:', err);
     res.status(500).json({ error: 'Database error while fetching buses' });
@@ -49,11 +63,17 @@ router.post('/operator/schedules', verifyToken, async (req, res) => {
   }
 
   try {
-    const result = await pool.query(
-      'INSERT INTO schedules(bus_id, departure_time, arrival_time, starting_point, destination) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [bus_id, departure_time, arrival_time, starting_point, destination]
-    );
-    res.status(201).json(result.rows[0]);
+    // Insert schedule into the 'schedules' table
+    const { data, error } = await supabase
+      .from('schedules')
+      .insert([{ bus_id, departure_time, arrival_time, starting_point, destination }])
+      .select();
+
+    if (error) {
+      return res.status(500).json({ error: 'Database error while adding schedule' });
+    }
+
+    res.status(201).json(data[0]);
   } catch (err) {
     console.error('Error adding schedule:', err);
     res.status(500).json({ error: 'Database error while adding schedule' });
@@ -63,8 +83,15 @@ router.post('/operator/schedules', verifyToken, async (req, res) => {
 // Get all schedules
 router.get('/schedules', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM schedules');
-    res.status(200).json(result.rows);
+    const { data, error } = await supabase
+      .from('schedules')
+      .select('*');
+
+    if (error) {
+      return res.status(500).json({ error: 'Database error while fetching schedules' });
+    }
+
+    res.status(200).json(data);
   } catch (err) {
     console.error('Error fetching schedules:', err);
     res.status(500).json({ error: 'Database error while fetching schedules' });
@@ -75,30 +102,50 @@ router.get('/schedules', async (req, res) => {
 router.get('/seats/:scheduleId', async (req, res) => {
   const { scheduleId } = req.params;
   try {
-    const scheduleResult = await pool.query('SELECT bus_id FROM schedules WHERE id = $1', [scheduleId]);
-    const schedule = scheduleResult.rows[0];
-    if (!schedule) {
+    // Fetch the bus associated with the schedule
+    const { data: schedule, error: scheduleError } = await supabase
+      .from('schedules')
+      .select('bus_id')
+      .eq('id', scheduleId)
+      .single();
+
+    if (scheduleError || !schedule) {
       return res.status(404).json({ error: 'Schedule not found' });
     }
 
-    const busResult = await pool.query('SELECT total_seats FROM buses WHERE id = $1', [schedule.bus_id]);
-    const bus = busResult.rows[0];
+    const { data: bus, error: busError } = await supabase
+      .from('buses')
+      .select('total_seats')
+      .eq('id', schedule.bus_id)
+      .single();
 
-    const bookedSeatsResult = await pool.query('SELECT seat_number FROM bookings WHERE schedule_id = $1', [scheduleId]);
-    const bookedSeats = bookedSeatsResult.rows.map(row => row.seat_number);
+    if (busError || !bus) {
+      return res.status(500).json({ error: 'Bus not found' });
+    }
 
+    // Fetch the booked seats for the given schedule
+    const { data: bookedSeats, error: bookedSeatsError } = await supabase
+      .from('bookings')
+      .select('seat_number')
+      .eq('schedule_id', scheduleId);
+
+    if (bookedSeatsError) {
+      return res.status(500).json({ error: 'Error fetching booked seats' });
+    }
+
+    // Generate the list of available seats
     const availableSeats = [];
     for (let i = 1; i <= bus.total_seats; i++) {
       availableSeats.push({
         seat_number: i,
-        is_available: !bookedSeats.includes(i), // If the seat is not booked
+        is_available: !bookedSeats.some(booking => booking.seat_number === i),
       });
     }
 
     res.status(200).json(availableSeats);
   } catch (err) {
     console.error('Error fetching seat availability:', err);
-    res.status(500).json({ error: 'Database error while fetching seat availability' });
+    res.status(500).json({ error: 'Error fetching seat availability' });
   }
 });
 
@@ -110,28 +157,53 @@ router.post('/bookings', verifyToken, async (req, res) => {
   }
 
   try {
-    const scheduleResult = await pool.query('SELECT * FROM schedules WHERE id = $1', [schedule_id]);
-    const schedule = scheduleResult.rows[0];
-    if (!schedule) {
+    // Fetch the schedule to ensure it exists
+    const { data: schedule, error: scheduleError } = await supabase
+      .from('schedules')
+      .select('*')
+      .eq('id', schedule_id)
+      .single();
+
+    if (scheduleError || !schedule) {
       return res.status(404).json({ error: 'Schedule not found' });
     }
 
-    const busResult = await pool.query('SELECT total_seats FROM buses WHERE id = $1', [schedule.bus_id]);
-    const bus = busResult.rows[0];
+    // Fetch the bus to ensure it exists
+    const { data: bus, error: busError } = await supabase
+      .from('buses')
+      .select('total_seats')
+      .eq('id', schedule.bus_id)
+      .single();
 
-    const bookedSeatsResult = await pool.query('SELECT seat_number FROM bookings WHERE schedule_id = $1', [schedule_id]);
-    const bookedSeats = bookedSeatsResult.rows.map(row => row.seat_number);
+    if (busError || !bus) {
+      return res.status(500).json({ error: 'Bus not found' });
+    }
 
-    if (bookedSeats.includes(seat_number)) {
+    // Check if the seat is already booked
+    const { data: bookedSeats, error: bookedSeatsError } = await supabase
+      .from('bookings')
+      .select('seat_number')
+      .eq('schedule_id', schedule_id);
+
+    if (bookedSeatsError) {
+      return res.status(500).json({ error: 'Error checking booked seats' });
+    }
+
+    if (bookedSeats.some(booking => booking.seat_number === seat_number)) {
       return res.status(400).json({ error: 'This seat is already booked' });
     }
 
-    const bookingResult = await pool.query(
-      'INSERT INTO bookings(user_name, bus_id, schedule_id, seat_number) VALUES ($1, $2, $3, $4) RETURNING *',
-      [user_name, schedule.bus_id, schedule_id, seat_number]
-    );
+    // Insert the booking
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .insert([{ user_name, bus_id: schedule.bus_id, schedule_id, seat_number }])
+      .select();
 
-    res.status(201).json(bookingResult.rows[0]);
+    if (bookingError) {
+      return res.status(500).json({ error: 'Database error while booking seat' });
+    }
+
+    res.status(201).json(booking[0]);
   } catch (err) {
     console.error('Error booking seat:', err);
     res.status(500).json({ error: 'Database error while booking seat' });
